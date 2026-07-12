@@ -1,0 +1,33 @@
+[project]
+name = "reddit-king"
+version = "0.2.0"
+description = "Minimal keyword-focused Reddit post and comment collector"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "beautifulsoup4>=4.13",
+    "requests>=2.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0,<7",
+    "pytest>=8.3.0",
+    "ruff>=0.11.0",
+]
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

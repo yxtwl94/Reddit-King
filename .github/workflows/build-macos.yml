@@ -1,0 +1,45 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build macOS app and DMG
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build app, ZIP, and DMG
+        run: bash build-mac.sh
+        env:
+          PYTHON_BIN: python3
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Reddit-King-macOS
+          path: |
+            dist/Reddit-King-macOS.zip
+            dist/Reddit-King.dmg
+          if-no-files-found: error
+          retention-days: 14

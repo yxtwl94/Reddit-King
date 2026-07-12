@@ -1,0 +1,2 @@
+# Legacy compatibility only. Preferred setup: uv sync
+requests>=2.32.0
