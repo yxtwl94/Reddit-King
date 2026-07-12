@@ -445,10 +445,15 @@ class KeywordCollector:
                         f"Reddit 评论 {reported_comments} 条，返回 {len(comments)} 条，"
                         f"本次新增保存 {len(new_comments)} 条"
                     )
+                completeness_progress = (
+                    f"{incomplete_threads} 篇采集数低于 Reddit 显示评论数"
+                    if incomplete_threads
+                    else "当前已处理帖子均达到 Reddit 显示评论数"
+                )
                 self._emit(
                     f"落盘进度 | 帖子 {saved_posts}/{target_label} | {comment_progress} | "
                     f"累计保存评论 {saved_comments} | "
-                    f"不完整评论树 {incomplete_threads} | 已写入磁盘"
+                    f"评论完整性: {completeness_progress} | 已写入磁盘"
                 )
 
             if cfg.post_limit and saved_posts >= cfg.post_limit:
@@ -462,8 +467,13 @@ class KeywordCollector:
             "posts_file": str(self.posts_path.resolve()),
             "comments_file": str(self.comments_path.resolve()),
         }
+        completeness_summary = (
+            f"{incomplete_threads} 篇采集数低于 Reddit 显示评论数"
+            if incomplete_threads
+            else "已处理帖子均达到 Reddit 显示评论数"
+        )
         self._emit(
-            f"完成：帖子 {saved_posts}，新增评论 {saved_comments}，"
-            f"未完全匹配 Reddit 评论计数的评论树 {incomplete_threads}"
+            f"完成：帖子 {saved_posts}，新增评论 {saved_comments}；"
+            f"评论完整性：{completeness_summary}"
         )
         return summary

@@ -12,6 +12,7 @@ import codecs
 import datetime as dt
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -35,7 +36,12 @@ from scraper.reddit_auth import capture_and_save_reddit_login, has_saved_reddit_
 
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
-OUTPUT_ROOT = ROOT / "output"
+if FROZEN and sys.platform == "darwin":
+    APP_DATA_ROOT = Path.home() / "Library" / "Application Support" / "Reddit-King"
+    OUTPUT_ROOT = Path.home() / "Documents" / "Reddit-King" / "output"
+else:
+    APP_DATA_ROOT = ROOT
+    OUTPUT_ROOT = ROOT / "output"
 URL_PATTERN = re.compile(r"https?://[^\s|]+")
 SORT_VALUES = {
     "关联性": "relevance",
@@ -64,6 +70,7 @@ class RedditKingGui:
         self.log_offset = 0
         self.log_decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.url_tag_counter = 0
+        self.stop_requested = False
 
         root.title("Reddit King - 关键词帖子与评论采集器")
         window_width = 820
@@ -431,6 +438,7 @@ class RedditKingGui:
             return
 
         output_path.mkdir(parents=True, exist_ok=True)
+        APP_DATA_ROOT.mkdir(parents=True, exist_ok=True)
         self.last_output_path = output_path
         self.run_log_path = output_path / "run.log"
         self.log_offset = 0
@@ -448,7 +456,7 @@ class RedditKingGui:
             {
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUNBUFFERED": "1",
-                "UV_CACHE_DIR": str(ROOT / ".uv-cache"),
+                "UV_CACHE_DIR": str(APP_DATA_ROOT / ".uv-cache"),
             }
         )
         try:
@@ -458,11 +466,12 @@ class RedditKingGui:
                 )
                 self.process = subprocess.Popen(
                     command,
-                    cwd=ROOT,
+                    cwd=APP_DATA_ROOT,
                     env=env,
                     stdout=log_handle,
                     stderr=subprocess.STDOUT,
                     creationflags=CREATE_NO_WINDOW,
+                    start_new_session=os.name != "nt",
                 )
         except (OSError, subprocess.SubprocessError) as exc:
             self.append_log(f"启动失败：{exc}\n")
@@ -472,6 +481,7 @@ class RedditKingGui:
 
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
+        self.stop_requested = False
         self.status.set(f"运行中，PID {self.process.pid}")
 
     def poll(self) -> None:
@@ -480,10 +490,14 @@ class RedditKingGui:
             exit_code = self.process.returncode
             self.append_runner_exit(exit_code)
             self.read_new_log()
-            self.status.set("采集完成" if exit_code == 0 else f"任务结束，代码 {exit_code}")
+            if self.stop_requested:
+                self.status.set("采集已停止")
+            else:
+                self.status.set("采集完成" if exit_code == 0 else f"任务结束，代码 {exit_code}")
             self.start_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
             self.process = None
+            self.stop_requested = False
         self.root.after(500, self.poll)
 
     def read_new_log(self) -> None:
@@ -561,23 +575,67 @@ class RedditKingGui:
         if not self.process or self.process.poll() is not None:
             return
         self.append_log("正在停止采集进程...\n")
-        subprocess.run(
-            ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
-            capture_output=True,
-            creationflags=CREATE_NO_WINDOW,
-            check=False,
-        )
+        process = self.process
+        self.stop_requested = True
+        self.stop_button.configure(state="disabled")
+        self.status.set("正在停止...")
+        self._signal_process_tree(process, force=False)
+        if os.name != "nt":
+            self.root.after(3000, lambda: self._force_stop_if_running(process))
+
+    def _signal_process_tree(
+        self, process: subprocess.Popen[bytes], *, force: bool
+    ) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                creationflags=CREATE_NO_WINDOW,
+                check=False,
+            )
+            return
+        try:
+            os.killpg(
+                os.getpgid(process.pid),
+                signal.SIGKILL if force else signal.SIGINT,
+            )
+        except (OSError, ProcessLookupError):
+            if force and process.poll() is None:
+                process.kill()
+
+    def _force_stop_if_running(self, process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is None:
+            self.append_log("采集进程未及时退出，正在强制停止...\n")
+            self._signal_process_tree(process, force=True)
 
     def open_output(self) -> None:
-        target = self.last_output_path or Path(self.output_root.get().strip() or OUTPUT_ROOT)
-        target.mkdir(parents=True, exist_ok=True)
-        os.startfile(target)  # type: ignore[attr-defined]
+        target = (
+            self.last_output_path
+            or Path(self.output_root.get().strip() or OUTPUT_ROOT).expanduser().resolve()
+        )
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+            elif os.name == "nt":
+                os.startfile(target)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except (OSError, subprocess.SubprocessError) as exc:
+            messagebox.showerror("打开失败", f"无法打开输出目录：\n{target}\n\n{exc}")
 
     def on_close(self) -> None:
         if self.process and self.process.poll() is None:
             if not messagebox.askyesno("确认关闭", "采集仍在运行，关闭窗口会停止任务。是否继续？"):
                 return
-            self.stop_collection()
+            process = self.process
+            self._signal_process_tree(process, force=False)
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._signal_process_tree(process, force=True)
         self.root.destroy()
 
 

@@ -213,6 +213,9 @@ dist/Reddit-King.dmg
 签名和公证的应用首次运行时，需要在 Finder 中右键应用并选择“打开”。当前匿名
 采集支持 macOS；预登录 Cookie 的长期系统加密保存目前仅支持 Windows。
 
+打包后的 macOS 应用默认把结果保存到 `~/Documents/Reddit-King/output`，不会写入
+`.app` 应用包内部。“打开输出目录”会直接在 Finder 中显示最近一次任务目录。
+
 ## uv 环境
 
 ```powershell
